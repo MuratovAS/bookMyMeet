@@ -1,0 +1,16 @@
+services:
+  bookmymeet:
+    image: ghcr.io/muratovas/bookmymeet
+    container_name: bookmymeet
+    restart: unless-stopped
+    ports:
+      - 5000:5000
+    environment:
+      - DAYS_AVAILABLE=28               # Meeting planning horizon
+      - WORKDAY_START=8                 # Start of the working day in UTC format
+      - WORKDAY_END=19                  # End of working day in UTC format
+      - CALDAV_SERVER_URL=https://EXAMPLE/dav/calendars/USER/
+      - CALDAV_USERNAME=USER            # CALDAV username
+      - CALDAV_PASSWORD=PASS            # CALDAV password
+      - CALDAV_CALENDAR=DEFAULT         # CALDAV calendar
+      # - CALDAV_ADDITIONAL_CALENDARS=  # CALDAV additional calendars

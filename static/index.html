@@ -1,0 +1,145 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book my meet</title>
+    <link rel="icon" href="/static/favicon.png" type="image/x-icon">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="left-section">
+            <!-- Calendar -->
+            <div class="calendar-section">
+                <div class="section-header">
+                    <span class="calendar-icon">📅</span>
+                    <h2>Calendar</h2>
+                </div>
+
+                <div class="month-year-selector">
+                    <div class="month-selector">
+                        <label>Month:</label>
+                        <select id="monthSelect"></select>
+                    </div>
+                    <div class="timezone-selector">
+                        <label>Timezone:</label>
+                        <select id="timezoneSelect">
+                            <option value="0">UTC (London)</option>
+                            <option value="1" selected>CET (Central European Time)</option>
+                            <option value="2">EET (Eastern European Time)</option>
+                            <option value="3">MSK (Moscow Standard Time)</option>
+                            <option value="4">GST (Gulf Standard Time)</option>
+                            <option value="5">YEKT (Yekaterinburg Time)</option>
+                            <option value="6">ALMT (Alma-Ata Time)</option>
+                            <option value="7">ICT (Indochina Time)</option>
+                            <option value="8">CST (China Standard Time)</option>
+                            <option value="9">JST (Japan Standard Time)</option>
+                            <option value="10">AEST (Australian Eastern Time)</option>
+                            <option value="-5">EST (Eastern Standard Time)</option>
+                            <option value="-6">CST (Central Standard Time)</option>
+                            <option value="-7">MST (Mountain Standard Time)</option>
+                            <option value="-8">PST (Pacific Standard Time)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="calendar">
+                    <div class="calendar-header">
+                        <div class="day-header">Mon</div>
+                        <div class="day-header">Tue</div>
+                        <div class="day-header">Wed</div>
+                        <div class="day-header">Thu</div>
+                        <div class="day-header">Fri</div>
+                        <div class="day-header">Sat</div>
+                        <div class="day-header">Sun</div>
+                    </div>
+                    <div class="calendar-body" id="calendarBody"></div>
+                </div>
+
+                <div class="time-slots" id="timeSlots" style="display: none;">
+                    <h3>Available time slots:</h3>
+                    <div class="slots-grid" id="slotsGrid"></div>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="right-section">
+            <!-- Booking form -->
+            <div class="booking-section">
+                <div class="section-header">
+                    <span class="clipboard-icon">📋</span>
+                    <h2>Booking Form</h2>
+                </div>
+
+                <form class="booking-form" id="bookingForm">
+                    <div class="form-group">
+                        <label>Topic *</label>
+                        <input type="text" name="topic" placeholder="Enter consultation topic" class="form-input" disabled>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Who are you? *</label>
+                        <input type="text" name="fullName" placeholder="Enter your name, nickname or organization" class="form-input" disabled>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Contact method *</label>
+                        <input type="text" name="contactInfo" placeholder="Telegram, jami or url" class="form-input" disabled>
+                    </div>
+
+                    <button type="submit" class="book-btn" disabled>
+                        <span class="calendar-icon">📅</span>
+                        Booking a meet
+                    </button>
+                </form>
+            </div>
+
+            <!-- Cancel booking -->
+            <div class="cancel-section">
+                <div class="section-header">
+                    <span class="cancel-icon">❌</span>
+                    <h2>Cancel Booking</h2>
+                </div>
+
+                <form class="cancel-form" id="cancelForm">
+                    <div class="form-group">
+                        <input type="text" id="cancelCode" name="code" placeholder="Enter cancellation code" class="form-input" required>
+                    </div>
+
+                    <button type="submit" class="cancel-btn" disabled>
+                        <span class="cancel-icon">🗑️</span>
+                        Cancel booking
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal window -->
+    <div class="modal" id="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle"></h3>
+                <span class="close-btn" id="closeModal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p id="modalMessage"></p>
+                <div id="modalCode" style="display: none;">
+                <strong>Your cancellation code: <span id="codeDisplay"></span></strong>
+                <p style="font-size: 14px; color: #666; margin-top: 10px;">
+                    Save this code to cancel your booking later
+                </p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn" id="modalBtn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

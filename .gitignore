@@ -1,0 +1,22 @@
+# General
+*.bck
+*.bak
+.~*
+_autosave-*
+*/#auto_saved_files#
+*/*-backups/*
+
+
+# Golang
+
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+
+*.test
+gopath/
+go.work
+# vendor/
