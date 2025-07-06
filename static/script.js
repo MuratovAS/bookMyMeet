@@ -129,11 +129,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 dayElement.classList.add('disabled');
             }
             
-            // Weekend days
-            if (dayOfWeek === 0 ) { //|| dayOfWeek === 6
-                dayElement.classList.add('disabled');
-            }
-            
             // Past dates
             if (currentDayDate < new Date().setHours(0,0,0,0)) {
                 dayElement.classList.add('disabled');
