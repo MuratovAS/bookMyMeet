@@ -97,7 +97,6 @@ var (
 	
 	eventsCache      map[string][]*ical.Component // Events cache by date
 	eventsCacheMutex sync.RWMutex
-	eventsLastSync   time.Time
 )
 
 
@@ -405,8 +404,6 @@ func syncEventsCache(dates []string) {
 		}
 		eventsCache[res.date] = res.events
 	}
-
-	eventsLastSync = time.Now()
 }
 
 func bookingSlot(w http.ResponseWriter, r *http.Request) {
