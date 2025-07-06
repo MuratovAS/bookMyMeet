@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-
+	_ "time/tzdata"
 	"golang.org/x/time/rate"
 	"github.com/emersion/go-ical"
 	"github.com/emersion/go-webdav/caldav"
@@ -407,66 +407,6 @@ func syncEventsCache(dates []string) {
 	}
 
 	eventsLastSync = time.Now()
-}
-
-func isSlotBooked(date, timeSlot string) bool {
-	if caldavClient == nil {
-		log.Printf("CalDAV client not initialized")
-		return true
-	}
-
-	// Parse date and time
-	datetime, err := time.Parse("2006-01-02 15:04", date+" "+timeSlot)
-	if err != nil {
-		log.Printf("Error parsing date/time: %v", err)
-		return true
-	}
-
-	// Check events cache
-	eventsCacheMutex.RLock()
-	events, exists := eventsCache[date]
-	lastSync := eventsLastSync
-	eventsCacheMutex.RUnlock()
-
-	// If cache is stale (older than 1 minute) or no data for this date, refresh
-	if !exists || time.Since(lastSync) > time.Minute {
-		syncEventsCache([]string{date})
-		eventsCacheMutex.RLock()
-		events = eventsCache[date]
-		eventsCacheMutex.RUnlock()
-	}
-
-	// Check events
-	for _, event := range events {
-		dtstart := event.Props.Get(ical.PropDateTimeStart)
-		if dtstart == nil {
-			continue
-		}
-
-		eventTime, err := dtstart.DateTime(time.UTC)
-		if err != nil {
-			continue
-		}
-
-		dtend := event.Props.Get(ical.PropDateTimeEnd)
-		if dtend == nil {
-			dtend = &ical.Prop{Value: eventTime.Add(time.Hour).Format("20060102T150405Z")}
-		}
-		
-		endTime, err := dtend.DateTime(time.UTC)
-		if err != nil {
-			continue
-		}
-
-		slotStart := datetime
-		slotEnd := datetime.Add(time.Hour)
-		
-		if eventTime.Before(slotEnd) && endTime.After(slotStart) {
-			return true
-		}
-	}
-
-	return false
 }
 
 func bookingSlot(w http.ResponseWriter, r *http.Request) {
