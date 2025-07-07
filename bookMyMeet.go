@@ -4,6 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/emersion/go-ical"
+	"github.com/emersion/go-webdav/caldav"
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"golang.org/x/time/rate"
 	"log"
 	"net/http"
 	"os"
@@ -12,22 +17,17 @@ import (
 	"sync"
 	"time"
 	_ "time/tzdata"
-	"golang.org/x/time/rate"
-	"github.com/emersion/go-ical"
-	"github.com/emersion/go-webdav/caldav"
-	"github.com/google/uuid"
-	"github.com/gorilla/mux"
 )
 
 var (
-	DaysAvailableForBooking = getEnvInt("DAYS_AVAILABLE", 28)      // Number of days available for booking
-	WorkDayStartHour        = getEnvInt("WORKDAY_START", 8)        // Workday start hour (UTC)
-	WorkDayEndHour          = getEnvInt("WORKDAY_END", 19)         // Workday end hour (UTC)
-	
-	CalDAVServerURL          = getEnvStr("CALDAV_SERVER_URL", "")
-	CalDAVUsername           = getEnvStr("CALDAV_USERNAME", "")
-	CalDAVPassword           = getEnvStr("CALDAV_PASSWORD", "")
-	CalDAVCalendar           = getEnvStr("CALDAV_CALENDAR", "")
+	DaysAvailableForBooking = getEnvInt("DAYS_AVAILABLE", 28) // Number of days available for booking
+	WorkDayStartHour        = getEnvInt("WORKDAY_START", 8)   // Workday start hour (UTC)
+	WorkDayEndHour          = getEnvInt("WORKDAY_END", 19)    // Workday end hour (UTC)
+
+	CalDAVServerURL           = getEnvStr("CALDAV_SERVER_URL", "")
+	CalDAVUsername            = getEnvStr("CALDAV_USERNAME", "")
+	CalDAVPassword            = getEnvStr("CALDAV_PASSWORD", "")
+	CalDAVCalendar            = getEnvStr("CALDAV_CALENDAR", "")
 	CalDAVAdditionalCalendars = getEnvStrSlice("CALDAV_ADDITIONAL_CALENDARS", "")
 )
 
@@ -75,30 +75,38 @@ type CancelRequest struct {
 }
 
 type CalDAVConfig struct {
-	ServerURL          string
-	Username           string
-	Password           string
-	Calendar           string
+	ServerURL           string
+	Username            string
+	Password            string
+	Calendar            string
 	AdditionalCalendars []string
 }
 
+// RRule represents a recurrence rule
+type RRule struct {
+	Freq     string    // DAILY, WEEKLY, MONTHLY, YEARLY
+	Interval int       // Interval between recurrences
+	Count    int       // Number of occurrences (0 = unlimited)
+	Until    time.Time // End date for recurrences
+	ByDay    []string  // Days of week for WEEKLY (MO, TU, WE, etc.)
+}
+
 var caldavConfig = CalDAVConfig{
-	ServerURL:          CalDAVServerURL,
-	Username:           CalDAVUsername,
-	Password:           CalDAVPassword,
-	Calendar:           CalDAVCalendar,
+	ServerURL:           CalDAVServerURL,
+	Username:            CalDAVUsername,
+	Password:            CalDAVPassword,
+	Calendar:            CalDAVCalendar,
 	AdditionalCalendars: CalDAVAdditionalCalendars,
 }
 
 var (
-	limiter = rate.NewLimiter(rate.Every(time.Minute), 100) // 100 requests per minute
-	bookingCodes = make(map[string]string) // In production use a database
+	limiter      = rate.NewLimiter(rate.Every(time.Minute), 100) // 100 requests per minute
+	bookingCodes = make(map[string]string)                       // In production use a database
 	caldavClient *caldav.Client
-	
+
 	eventsCache      map[string][]*ical.Component // Events cache by date
 	eventsCacheMutex sync.RWMutex
 )
-
 
 func generateAvailableSlotsDirect() map[string][]string {
 	slots := make(map[string][]string)
@@ -109,7 +117,7 @@ func generateAvailableSlotsDirect() map[string][]string {
 	for i := 0; i < DaysAvailableForBooking; i++ {
 		date := now.AddDate(0, 0, i)
 		dateStr := date.Format("2006-01-02")
-		
+
 		// Skip weekends
 		if date.Weekday() == time.Sunday {
 			continue
@@ -156,12 +164,12 @@ func generateAvailableSlotsDirect() map[string][]string {
 				if dtend == nil {
 					dtend = &ical.Prop{Value: eventTime.Add(time.Hour).Format("20060102T150405Z")}
 				}
-				
+
 				endTime, err := dtend.DateTime(time.UTC)
 				if err != nil {
 					continue
 				}
-				
+
 				if eventTime.Before(slotEnd) && endTime.After(slotStart) {
 					slotFree = false
 					break
@@ -281,6 +289,211 @@ func availableSlots(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// parseRRule parses RRULE string into RRule struct
+func parseRRule(rruleStr string) (*RRule, error) {
+	if rruleStr == "" {
+		return nil, nil
+	}
+
+	rrule := &RRule{
+		Interval: 1, // Default interval
+	}
+
+	// Remove RRULE: prefix if present
+	rruleStr = strings.TrimPrefix(rruleStr, "RRULE:")
+
+	// Split by semicolon
+	parts := strings.Split(rruleStr, ";")
+
+	for _, part := range parts {
+		keyValue := strings.Split(part, "=")
+		if len(keyValue) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(keyValue[0])
+		value := strings.TrimSpace(keyValue[1])
+
+		switch key {
+		case "FREQ":
+			rrule.Freq = value
+		case "INTERVAL":
+			if interval, err := strconv.Atoi(value); err == nil {
+				rrule.Interval = interval
+			}
+		case "COUNT":
+			if count, err := strconv.Atoi(value); err == nil {
+				rrule.Count = count
+			}
+		case "UNTIL":
+			// Parse UNTIL date (format: 20231231T235959Z)
+			if until, err := time.Parse("20060102T150405Z", value); err == nil {
+				rrule.Until = until
+			} else if until, err := time.Parse("20060102", value); err == nil {
+				rrule.Until = until
+			}
+		case "BYDAY":
+			rrule.ByDay = strings.Split(value, ",")
+		}
+	}
+
+	return rrule, nil
+}
+
+// expandRecurringEvent generates recurring event instances for a given date range
+func expandRecurringEvent(event *ical.Component, startDate, endDate time.Time) []*ical.Component {
+	var expandedEvents []*ical.Component
+
+	// Get event start time
+	dtstart := event.Props.Get(ical.PropDateTimeStart)
+	if dtstart == nil {
+		return []*ical.Component{event} // Return original if no start time
+	}
+
+	eventStart, err := dtstart.DateTime(time.UTC)
+	if err != nil {
+		return []*ical.Component{event}
+	}
+
+	// Get event duration
+	dtend := event.Props.Get(ical.PropDateTimeEnd)
+	var duration time.Duration = time.Hour // Default 1 hour
+	if dtend != nil {
+		if eventEnd, err := dtend.DateTime(time.UTC); err == nil {
+			duration = eventEnd.Sub(eventStart)
+		}
+	}
+
+	// Check for RRULE
+	rruleProp := event.Props.Get(ical.PropRecurrenceRule)
+	if rruleProp == nil {
+		// No recurrence rule, return original event if it falls within date range
+		if (eventStart.After(startDate) || eventStart.Equal(startDate)) && eventStart.Before(endDate) {
+			return []*ical.Component{event}
+		}
+		return nil
+	}
+
+	rrule, err := parseRRule(rruleProp.Value)
+	if err != nil || rrule == nil {
+		return []*ical.Component{event}
+	}
+
+	// Generate recurring instances
+	current := eventStart
+	count := 0
+	maxIterations := 1000 // Safety limit
+
+	for i := 0; i < maxIterations; i++ {
+		// Check if we've exceeded the count limit
+		if rrule.Count > 0 && count >= rrule.Count {
+			break
+		}
+
+		// Check if we've exceeded the until date
+		if !rrule.Until.IsZero() && current.After(rrule.Until) {
+			break
+		}
+
+		// Check if current date is beyond our search range
+		if current.After(endDate) {
+			break
+		}
+
+		// If current date is within our range, create an event instance
+		if (current.After(startDate) || current.Equal(startDate)) && current.Before(endDate) {
+			// Create a copy of the original event with new date/time
+			eventCopy := &ical.Component{
+				Name:     event.Name,
+				Props:    make(ical.Props),
+				Children: event.Children,
+			}
+
+			// Copy all properties
+			for key, props := range event.Props {
+				eventCopy.Props[key] = make([]ical.Prop, len(props))
+				for i, prop := range props {
+					eventCopy.Props[key][i] = prop
+				}
+			}
+
+			// Update start and end times
+			eventCopy.Props.SetDateTime(ical.PropDateTimeStart, current.UTC())
+			eventCopy.Props.SetDateTime(ical.PropDateTimeEnd, current.Add(duration).UTC())
+
+			expandedEvents = append(expandedEvents, eventCopy)
+			count++
+		}
+
+		// Calculate next occurrence
+		switch rrule.Freq {
+		case "DAILY":
+			current = current.AddDate(0, 0, rrule.Interval)
+		case "WEEKLY":
+			if len(rrule.ByDay) > 0 {
+				// Handle BYDAY for weekly recurrence
+				current = getNextWeeklyOccurrence(current, rrule.ByDay, rrule.Interval)
+			} else {
+				current = current.AddDate(0, 0, 7*rrule.Interval)
+			}
+		case "MONTHLY":
+			current = current.AddDate(0, rrule.Interval, 0)
+		case "YEARLY":
+			current = current.AddDate(rrule.Interval, 0, 0)
+		default:
+			// Unknown frequency, break to avoid infinite loop
+			break
+		}
+
+		// Safety check: if we haven't advanced time, break
+		if i > 0 && !current.After(eventStart.AddDate(0, 0, i)) {
+			break
+		}
+	}
+
+	return expandedEvents
+}
+
+// getNextWeeklyOccurrence calculates next weekly occurrence based on BYDAY
+func getNextWeeklyOccurrence(current time.Time, byDay []string, interval int) time.Time {
+	// Map day abbreviations to weekday
+	dayMap := map[string]time.Weekday{
+		"SU": time.Sunday,
+		"MO": time.Monday,
+		"TU": time.Tuesday,
+		"WE": time.Wednesday,
+		"TH": time.Thursday,
+		"FR": time.Friday,
+		"SA": time.Saturday,
+	}
+
+	// Convert BYDAY to weekdays
+	var targetDays []time.Weekday
+	for _, day := range byDay {
+		if wd, ok := dayMap[strings.ToUpper(day)]; ok {
+			targetDays = append(targetDays, wd)
+		}
+	}
+
+	if len(targetDays) == 0 {
+		// No valid days, fall back to weekly interval
+		return current.AddDate(0, 0, 7*interval)
+	}
+
+	// Find next occurrence
+	next := current.AddDate(0, 0, 1) // Start from next day
+	for i := 0; i < 7*interval; i++ {
+		for _, targetDay := range targetDays {
+			if next.Weekday() == targetDay {
+				return next
+			}
+		}
+		next = next.AddDate(0, 0, 1)
+	}
+
+	// Fallback
+	return current.AddDate(0, 0, 7*interval)
+}
 
 func loadEventsForDate(date string) ([]*ical.Component, error) {
 	// Parse date
@@ -292,18 +505,23 @@ func loadEventsForDate(date string) ([]*ical.Component, error) {
 	startOfDay := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
+	// Load all events from a wider range to catch recurring events
+	// that might start before our target date but recur on it
+	searchStart := startOfDay.AddDate(-1, 0, 0) // 1 year back
+	searchEnd := endOfDay.AddDate(1, 0, 0)      // 1 year forward
+
 	query := &caldav.CalendarQuery{
 		CompFilter: caldav.CompFilter{
 			Name: "VCALENDAR",
 			Comps: []caldav.CompFilter{{
 				Name:  "VEVENT",
-				Start: startOfDay,
-				End:   endOfDay,
+				Start: searchStart,
+				End:   searchEnd,
 			}},
 		},
 	}
 
-	var allEvents []*ical.Component
+	var allRawEvents []*ical.Component
 	calendarsToCheck := append([]string{caldavConfig.Calendar}, caldavConfig.AdditionalCalendars...)
 
 	// Use WaitGroup for parallel calendar processing
@@ -316,7 +534,7 @@ func loadEventsForDate(date string) ([]*ical.Component, error) {
 		wg.Add(1)
 		go func(cal string) {
 			defer wg.Done()
-			
+
 			calendarObjects, err := caldavClient.QueryCalendar(ctx, cal, query)
 			if err != nil {
 				log.Printf("Error querying calendar %s: %v", cal, err)
@@ -343,22 +561,27 @@ func loadEventsForDate(date string) ([]*ical.Component, error) {
 	close(eventsChan)
 	close(errChan)
 
-	// Collect results
+	// Collect raw events
 	for events := range eventsChan {
-		allEvents = append(allEvents, events...)
-	}
-
-	// If there were errors but we have some events - still return them
-	if len(allEvents) > 0 {
-		return allEvents, nil
+		allRawEvents = append(allRawEvents, events...)
 	}
 
 	// If failed to get any events at all, return error
-	if len(errChan) > 0 {
+	if len(allRawEvents) == 0 && len(errChan) > 0 {
 		return nil, <-errChan
 	}
 
-	return allEvents, nil
+	// Now expand recurring events for our target date
+	var expandedEvents []*ical.Component
+	for _, event := range allRawEvents {
+		// Expand each event for our target day
+		instances := expandRecurringEvent(event, startOfDay, endOfDay)
+		expandedEvents = append(expandedEvents, instances...)
+	}
+
+	//log.Printf("Loaded %d raw events, expanded to %d instances for date %s", len(allRawEvents), len(expandedEvents), date)
+
+	return expandedEvents, nil
 }
 
 func syncEventsCache(dates []string) {
