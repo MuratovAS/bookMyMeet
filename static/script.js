@@ -1,4 +1,70 @@
 
+// Function to get UTC offset for timezone
+function getTimezoneUTCOffset(timezone) {
+    const now = moment().tz(timezone);
+    const winter = moment('2024-01-15').tz(timezone);
+    const summer = moment('2024-07-15').tz(timezone);
+    
+    const winterOffset = winter.utcOffset() / 60;
+    const summerOffset = summer.utcOffset() / 60;
+    
+    if (winterOffset === summerOffset) {
+        return `UTC${winterOffset >= 0 ? '+' : ''}${winterOffset}`;
+    } else {
+        const min = Math.min(winterOffset, summerOffset);
+        const max = Math.max(winterOffset, summerOffset);
+        return `UTC${min >= 0 ? '+' : ''}${min}/${max >= 0 ? '+' : ''}${max}`;
+    }
+}
+
+// Function to get browser timezone
+function getBrowserTimezone() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch (error) {
+        console.warn('Failed to determine browser timezone:', error);
+        return 'Europe/Belgrade'; // Fallback
+    }
+}
+
+// Function to generate all timezone data
+function generateAllTimezones() {
+    const timezoneData = {};
+    const allTimezones = moment.tz.names();
+    const browserTimezone = getBrowserTimezone();
+    
+    // Sort timezones by regions and names
+    const sortedTimezones = allTimezones.sort((a, b) => {
+        // Priority for popular zones
+        const priority = ['Europe/', 'America/', 'Asia/', 'UTC'];
+        const aPriority = priority.findIndex(p => a.startsWith(p));
+        const bPriority = priority.findIndex(p => b.startsWith(p));
+        
+        if (aPriority !== bPriority) {
+            if (aPriority === -1) return 1;
+            if (bPriority === -1) return -1;
+            return aPriority - bPriority;
+        }
+        
+        return a.localeCompare(b);
+    });
+    
+    sortedTimezones.forEach((timezone, index) => {
+        const offset = getTimezoneUTCOffset(timezone);
+        const label = `${timezone} (${offset})`;
+        
+        timezoneData[timezone] = {
+            label: label,
+            default: timezone === browserTimezone // Automatically select browser timezone
+        };
+    });
+    
+    return timezoneData;
+}
+
+// Generate timezone configuration using moment-timezone
+const timezoneData = generateAllTimezones();
+
 document.addEventListener('DOMContentLoaded', function() {
     const calendarBody = document.getElementById('calendarBody');
     const monthSelect = document.getElementById('monthSelect');
@@ -9,30 +75,33 @@ document.addEventListener('DOMContentLoaded', function() {
     const cancelForm = document.getElementById('cancelForm');
     const modal = document.getElementById('modal');
     
-    let currentTimezone = 1; // Default CET (UTC+1/+2)
-    let isDST = true; // Daylight saving time flag
+    let currentTimezone = getBrowserTimezone(); // Automatically detect browser timezone
     
     let currentDate = new Date();
     let selectedDate = null;
     let selectedTime = null;
     let availableSlots = {};
     
-    // Time conversion considering daylight saving time
-    function convertTimeToTimezone(time, timezoneOffset) {
+    // Convert time to specified timezone using moment-timezone
+    function convertTimeToTimezone(time, timezone, baseDate = null) {
+        // Create base date (today or passed date)
+        const date = baseDate || new Date();
+        const dateStr = moment(date).format('YYYY-MM-DD');
+        
+        // Parse time and create UTC moment
         const [hours, minutes] = time.split(':').map(Number);
-        let offset = timezoneOffset;
+        const utcMoment = moment.utc(`${dateStr} ${time}`, 'YYYY-MM-DD HH:mm');
         
-        // For CET we consider daylight saving time (+1 hour)
-        if (timezoneOffset === 1 && isDST) {
-            offset += 1;
-        }
+        // Convert to target timezone
+        const convertedMoment = utcMoment.tz(timezone);
         
-        let newHours = hours + offset;
-        
-        if (newHours >= 24) newHours -= 24;
-        if (newHours < 0) newHours += 24;
-        
-        return `${String(newHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+        return convertedMoment.format('HH:mm');
+    }
+    
+    // Helper function to get current timezone offset
+    function getTimezoneOffset(timezone, date = null) {
+        const targetDate = date || new Date();
+        return moment.tz(targetDate, timezone).utcOffset() / 60;
     }
 
     // Initialization
@@ -41,11 +110,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Timezone change handler
     timezoneSelect.addEventListener('change', function() {
-        currentTimezone = parseInt(this.value);
-        // Determine daylight saving time for CET (March-October)
-        const now = new Date();
-        const month = now.getMonth();
-        isDST = (currentTimezone === 1) && (month >= 2 && month <= 9);
+        currentTimezone = this.value;
         
         if (selectedDate) {
             showTimeSlots(selectedDate);
@@ -53,6 +118,9 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     function initializeSelectors() {
+        // Initialize timezone selector with new data
+        initializeTimezoneSelector();
+        
         // Set current month and year
         const currentMonth = currentDate.getMonth();
         const currentYear = currentDate.getFullYear();
@@ -60,11 +128,20 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Add only current and next month
         for (let i = 0; i < 2; i++) {
-            const month = (currentMonth + i) % 12;
-            const year = month < currentMonth ? currentYear + 1 : currentYear;
+            let month = currentMonth + i;
+            let year = currentYear;
+            
+            // Handle December-January transition
+            if (month >= 12) {
+                month = month % 12;
+                year = currentYear + 1;
+            }
+            
+            console.log(`Adding month option: month=${month}, year=${year}`);
+            
             const option = document.createElement('option');
             option.value = `${month},${year}`;
-            option.textContent = new Date(0, month).toLocaleString('default', {month: 'long'});
+            option.textContent = new Date(year, month).toLocaleString('default', {month: 'long'});
             if (i === 0) option.selected = true;
             monthSelect.appendChild(option);
         }
@@ -76,6 +153,26 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         generateCalendar(currentMonth, currentYear);
+    }
+    
+    // Initialize timezone selector
+    function initializeTimezoneSelector() {
+        timezoneSelect.innerHTML = '';
+        
+        // Add options from timezoneData configuration
+        Object.entries(timezoneData).forEach(([timezone, config]) => {
+            const option = document.createElement('option');
+            option.value = timezone;
+            option.textContent = config.label;
+            
+            // Set as default
+            if (config.default) {
+                option.selected = true;
+                currentTimezone = timezone;
+            }
+            
+            timezoneSelect.appendChild(option);
+        });
     }
     
     async function loadAvailableSlots() {
@@ -189,7 +286,7 @@ document.addEventListener('DOMContentLoaded', function() {
             slotElement.className = 'time-slot';
             
             // Convert time to selected timezone
-            const convertedTime = convertTimeToTimezone(time, currentTimezone);
+            const convertedTime = convertTimeToTimezone(time, currentTimezone, date);
             slotElement.textContent = convertedTime;
             
             slotElement.addEventListener('click', function() {
@@ -233,9 +330,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     function formatDateForAPI(date) {
-        return date.getFullYear() + '-' + 
-               String(date.getMonth() + 1).padStart(2, '0') + '-' + 
-               String(date.getDate()).padStart(2, '0');
+        // Use moment for date formatting with timezone awareness
+        if (moment.isMoment(date)) {
+            return date.format('YYYY-MM-DD');
+        }
+        
+        // Backward compatibility with Date objects
+        return moment(date).format('YYYY-MM-DD');
     }
     
     // CSRF token handling
@@ -289,7 +390,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const result = await response.json();
             
             if (result.success) {
-                const convertedTime = convertTimeToTimezone(selectedTime, currentTimezone);
+                const convertedTime = convertTimeToTimezone(selectedTime, currentTimezone, selectedDate);
                 showModal('Booking successful!', 
                     `You are booked for ${selectedDate.toLocaleDateString('en-US')} at ${convertedTime}`, 
                     result.code);

@@ -25,23 +25,7 @@
                     </div>
                     <div class="timezone-selector">
                         <label>Timezone:</label>
-                        <select id="timezoneSelect">
-                            <option value="0">UTC (London)</option>
-                            <option value="1" selected>CET (Central European Time)</option>
-                            <option value="2">EET (Eastern European Time)</option>
-                            <option value="3">MSK (Moscow Standard Time)</option>
-                            <option value="4">GST (Gulf Standard Time)</option>
-                            <option value="5">YEKT (Yekaterinburg Time)</option>
-                            <option value="6">ALMT (Alma-Ata Time)</option>
-                            <option value="7">ICT (Indochina Time)</option>
-                            <option value="8">CST (China Standard Time)</option>
-                            <option value="9">JST (Japan Standard Time)</option>
-                            <option value="10">AEST (Australian Eastern Time)</option>
-                            <option value="-5">EST (Eastern Standard Time)</option>
-                            <option value="-6">CST (Central Standard Time)</option>
-                            <option value="-7">MST (Mountain Standard Time)</option>
-                            <option value="-8">PST (Pacific Standard Time)</option>
-                        </select>
+                        <select id="timezoneSelect"></select>
                     </div>
                 </div>
 
@@ -140,6 +124,8 @@
         </div>
     </div>
 
+    <script src="/static/moment.min.js"></script>
+    <script src="/static/moment-timezone-with-data-10-year-range.js"></script>
     <script src="/static/script.js"></script>
 </body>
 </html>
