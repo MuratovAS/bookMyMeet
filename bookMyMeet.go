@@ -4,11 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/emersion/go-ical"
-	"github.com/emersion/go-webdav/caldav"
-	"github.com/google/uuid"
-	"github.com/gorilla/mux"
-	"golang.org/x/time/rate"
 	"log"
 	"net/http"
 	"os"
@@ -17,12 +12,19 @@ import (
 	"sync"
 	"time"
 	_ "time/tzdata"
+
+	"github.com/emersion/go-ical"
+	"github.com/emersion/go-webdav/caldav"
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"golang.org/x/time/rate"
 )
 
 var (
-	DaysAvailableForBooking = getEnvInt("DAYS_AVAILABLE", 28) // Number of days available for booking
-	WorkDayStartHour        = getEnvInt("WORKDAY_START", 8)   // Workday start hour (UTC)
-	WorkDayEndHour          = getEnvInt("WORKDAY_END", 19)    // Workday end hour (UTC)
+	DaysAvailableForBooking = getEnvInt("DAYS_AVAILABLE", 28)                      // Number of days available for booking
+	WorkDayStartHour        = getEnvInt("WORKDAY_START", 8)                        // Workday start hour (UTC)
+	WorkDayEndHour          = getEnvInt("WORKDAY_END", 19)                         // Workday end hour (UTC)
+	WorkingDays             = getEnvStr("WORKING_DAYS", "mon,tue,wed,thu,fri,sat") // Working days
 
 	CalDAVServerURL           = getEnvStr("CALDAV_SERVER_URL", "")
 	CalDAVUsername            = getEnvStr("CALDAV_USERNAME", "")
@@ -52,6 +54,41 @@ func getEnvStrSlice(key, defaultValue string) []string {
 		return strings.Split(value, ",")
 	}
 	return strings.Split(defaultValue, ",")
+}
+
+// parseWeekdays converts a comma-separated string of weekdays to []time.Weekday
+func parseWeekdays(daysStr string) ([]time.Weekday, error) {
+	if daysStr == "" {
+		// Default: all days except Sunday
+		return []time.Weekday{
+			time.Monday, time.Tuesday, time.Wednesday,
+			time.Thursday, time.Friday, time.Saturday,
+		}, nil
+	}
+
+	dayMap := map[string]time.Weekday{
+		"mon": time.Monday,
+		"tue": time.Tuesday,
+		"wed": time.Wednesday,
+		"thu": time.Thursday,
+		"fri": time.Friday,
+		"sat": time.Saturday,
+		"sun": time.Sunday,
+	}
+
+	var weekdays []time.Weekday
+	dayParts := strings.Split(strings.ToLower(daysStr), ",")
+
+	for _, day := range dayParts {
+		day = strings.TrimSpace(day)
+		if weekday, exists := dayMap[day]; exists {
+			weekdays = append(weekdays, weekday)
+		} else {
+			return nil, fmt.Errorf("unknown weekday: %s", day)
+		}
+	}
+
+	return weekdays, nil
 }
 
 type BookingRequest struct {
@@ -106,7 +143,25 @@ var (
 
 	eventsCache      map[string][]*ical.Component // Events cache by date
 	eventsCacheMutex sync.RWMutex
+
+	// Parsed working weekdays
+	workingWeekdays []time.Weekday
 )
+
+// init initializes and validates environment variables
+func init() {
+	var err error
+	workingWeekdays, err = parseWeekdays(WorkingDays)
+	if err != nil {
+		log.Fatalf("Error parsing WORKING_DAYS: %v", err)
+	}
+
+	if len(workingWeekdays) == 0 {
+		log.Fatalf("WORKING_DAYS cannot be empty")
+	}
+
+	log.Printf("Working days configured: %v", workingWeekdays)
+}
 
 func generateAvailableSlotsDirect() map[string][]string {
 	slots := make(map[string][]string)
@@ -118,8 +173,16 @@ func generateAvailableSlotsDirect() map[string][]string {
 		date := now.AddDate(0, 0, i)
 		dateStr := date.Format("2006-01-02")
 
-		// Skip weekends
-		if date.Weekday() == time.Sunday {
+		// Check if current weekday is in working days
+		isWorkingDay := false
+		for _, workday := range workingWeekdays {
+			if date.Weekday() == workday {
+				isWorkingDay = true
+				break
+			}
+		}
+
+		if !isWorkingDay {
 			continue
 		}
 		datesToCheck = append(datesToCheck, dateStr)

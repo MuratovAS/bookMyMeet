@@ -54,6 +54,7 @@ Main configurable parameters:
 | DAYS_AVAILABLE             | Number of days available for booking | 28                 |
 | WORKDAY_START              | Workday start time (UTC)         | 8                     |
 | WORKDAY_END                | Workday end time (UTC)           | 19                    |
+| WORKING_DAYS               | Working days of the week         | mon,tue,wed,thu,fri,sat |
 | CALDAV_SERVER_URL          | CalDAV server URL                | -                     |
 | CALDAV_USERNAME            | CalDAV username                  | -                     |
 | CALDAV_PASSWORD            | CalDAV password                  | -                     |
